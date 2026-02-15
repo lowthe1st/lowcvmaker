@@ -57,7 +57,7 @@ function ResumePreviewFrame({ html, title = 'Resume preview' }) {
       className="resume-preview-frame"
       title={title}
       srcDoc={buildPreviewDocument(html)}
-      sandbox="allow-same-origin"
+       sandbox="allow-same-origin allow-scripts"
     />
   )
 }

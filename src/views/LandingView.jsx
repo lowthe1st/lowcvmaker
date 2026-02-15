@@ -2,7 +2,11 @@
 
 function TemplatePreview({ previewClass, accentColor }) {
   return (
-    <div className={`template-preview ${previewClass}`} aria-hidden="true" style={{ '--template-accent': accentColor }}>
+    <div
+      className={`template-preview ${previewClass}`}
+      aria-hidden="true"
+      style={{ '--template-accent': accentColor }}
+    >
       <div className="tpl-page">
         <div className="tpl-header" />
         <div className="tpl-body">
@@ -53,17 +57,32 @@ function LandingView({
   onUseTemplate,
   onUseJsonTheme,
   isAuthenticated,
+  onGoToDashboard,
+  signedInAs, // OPTIONAL: skicka in text om du vill
 }) {
   return (
     <main className="page-shell landing-shell">
       <div className="landing-frame">
         <header className="site-nav card">
           <a href="#top" className="brand">Low CV Maker</a>
+
           <nav className="nav-links" aria-label="Main navigation">
             <a href="#templates">Templates</a>
             <a href="#reviews">Reviews</a>
-            <button type="button" onClick={onGoToLogIn}>Log in</button>
-            <button type="button" className="nav-primary" onClick={onGoToSignUp}>Create account</button>
+
+            {isAuthenticated ? (
+              <>
+                {signedInAs ? <span className="nav-user">Signed in: {signedInAs}</span> : null}
+                <button type="button" className="nav-primary" onClick={onGoToDashboard}>
+                  Dashboard
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={onGoToLogIn}>Log in</button>
+                <button type="button" className="nav-primary" onClick={onGoToSignUp}>Create account</button>
+              </>
+            )}
           </nav>
         </header>
 
@@ -72,9 +91,23 @@ function LandingView({
           <p className="hero-subtext">
             Create a professional CV and cover letter in minutes with clean templates and simple editing.
           </p>
+
           <div className="landing-actions">
-            <button type="button" className="btn btn-primary" onClick={onCreateCv}>Create CV</button>
-            <button type="button" className="btn btn-ghost" onClick={onGoToLogIn}>Log in</button>
+            {isAuthenticated ? (
+              <>
+                <button type="button" className="btn btn-primary" onClick={onGoToDashboard}>
+                  Continue editing
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => window.location.hash = '#templates'}>
+                  Browse templates
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" className="btn btn-primary" onClick={onCreateCv}>Create CV</button>
+                <button type="button" className="btn btn-ghost" onClick={onGoToLogIn}>Log in</button>
+              </>
+            )}
           </div>
         </section>
 
@@ -82,6 +115,7 @@ function LandingView({
           <div className="section-head">
             <h2>Reviews</h2>
           </div>
+
           <div className="review-grid">
             <article className="review-card">
               <p className="stars" aria-label="Five stars">★★★★★</p>
@@ -91,6 +125,7 @@ function LandingView({
                 easy to tailor.
               </p>
             </article>
+
             <article className="review-card">
               <p className="stars" aria-label="Five stars">★★★★★</p>
               <p className="review-name">Gerald</p>
@@ -99,6 +134,7 @@ function LandingView({
                 formatting.
               </p>
             </article>
+
             <article className="review-card">
               <p className="stars" aria-label="Five stars">★★★★★</p>
               <p className="review-name">Ida</p>
@@ -106,6 +142,7 @@ function LandingView({
                 The structure helped me present my profile much better. It feels like a real product, not a generic form.
               </p>
             </article>
+
             <article className="review-card">
               <p className="stars" aria-label="Five stars">★★★★★</p>
               <p className="review-name">Ahmed</p>
@@ -125,14 +162,17 @@ function LandingView({
           <div className="template-grid">
             {internalTemplates.map((template) => (
               <article className="template-card" key={template.id}>
-                <TemplatePreview previewClass={mapPreviewClass(template.layoutType)} accentColor={template.accentColor} />
+                <TemplatePreview
+                  previewClass={mapPreviewClass(template.layoutType)}
+                  accentColor={template.accentColor}
+                />
                 <h3>{template.name}</h3>
                 <button
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => onUseTemplate(template.id)}
                 >
-                  Use this template
+                  {isAuthenticated ? 'Use & open editor' : 'Use this template'}
                 </button>
               </article>
             ))}
@@ -151,10 +191,18 @@ function LandingView({
                 <h3>{theme.displayName}</h3>
                 <p>{theme.description}</p>
                 <p className="theme-meta">
-                  Source: <a href={theme.sourceUrl} target="_blank" rel="noreferrer">{theme.packageName}</a> | License: {theme.license}
+                  Source:{' '}
+                  <a href={theme.sourceUrl} target="_blank" rel="noreferrer">
+                    {theme.packageName}
+                  </a>{' '}
+                  | License: {theme.license}
                 </p>
-                <button type="button" className="btn btn-secondary" onClick={() => onUseJsonTheme(theme.id)}>
-                  Use this theme
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => onUseJsonTheme(theme.id)}
+                >
+                  {isAuthenticated ? 'Apply & open editor' : 'Use this theme'}
                 </button>
               </article>
             ))}

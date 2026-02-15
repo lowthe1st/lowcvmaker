@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import SupabaseTest from '../components/SupabaseTest.jsx'
+import { useMemo, useState } from 'react'
 import ResumePreviewFrame from './ResumePreviewFrame.jsx'
 
 function AppView({
@@ -20,106 +19,229 @@ function AppView({
   onDownloadHtml,
   onDownloadPdf,
   onLogOut,
+  onGoHome,
 }) {
   const [mobileMode, setMobileMode] = useState('edit')
+
   const identity = user?.email || user?.provider || 'Unknown user'
   const signedInAs = user?.username ? `${user.username} (${identity})` : identity
 
+  const themeLabel = useMemo(() => {
+    const found = themeOptions?.find((t) => t.id === selectedThemeId)
+    return found?.displayName || found?.name || selectedThemeId
+  }, [themeOptions, selectedThemeId])
+
   return (
-    <main className="page-shell auth-shell">
-      <section className="home-container card home-layout">
-        <div className="home-header-row">
-          <div>
-            <h1>Home</h1>
-            <p className="auth-subtext">Signed in as: {signedInAs}</p>
-          </div>
-          <div className="home-top-actions">
-            <button type="button" className="btn btn-secondary" onClick={onSave}>Save</button>
-            <button type="button" className="btn btn-secondary" onClick={onDownloadHtml}>Download HTML</button>
-            <button type="button" className="btn btn-secondary" onClick={onDownloadPdf}>Download PDF</button>
-            <button type="button" className="btn btn-ghost" onClick={onLogOut}>Log out</button>
+    <div className="page">
+      <header className="topbar">
+        <div className="brand">
+          <div className="brandTitle">Home</div>
+          <div className="brandSub">
+            Signed in as: <span className="badge">{user?.username || 'User'}</span>{' '}
+            <span className="muted">({identity})</span>
+            <span className="muted"> · Theme: {themeLabel}</span>
           </div>
         </div>
 
-        <div className="home-mobile-toggle" role="tablist" aria-label="Editor mode">
-          <button
-            type="button"
-            className={`btn btn-secondary ${mobileMode === 'edit' ? 'is-active' : ''}`}
-            onClick={() => setMobileMode('edit')}
-            aria-selected={mobileMode === 'edit'}
-          >
-            Edit
+        <div className="actions">
+
+          <button type="button" className="btn" onClick={onGoHome}>
+            ← Back to landing
           </button>
-          <button
-            type="button"
-            className={`btn btn-secondary ${mobileMode === 'preview' ? 'is-active' : ''}`}
-            onClick={() => setMobileMode('preview')}
-            aria-selected={mobileMode === 'preview'}
-          >
-            Preview
+
+          <button type="button" className="btn btnPrimary" onClick={onSave}>
+            Save
+          </button>
+          <button type="button" className="btn" onClick={onDownloadHtml}>
+            Download HTML
+          </button>
+          <button type="button" className="btn" onClick={onDownloadPdf}>
+            Download PDF
+          </button>
+          <button type="button" className="btn btnDanger" onClick={onLogOut}>
+            Log out
           </button>
         </div>
+      </header>
 
-        <div className={`home-panels mode-${mobileMode}`}>
-          <div className="home-editor-panel">
-            <div className="form-grid">
+      {(status || error) && (
+        <div className={`notice ${error ? 'noticeError' : 'noticeOk'}`}>
+          {error || status}
+        </div>
+      )}
+
+      {/* Mobil toggle (syns med din responsiva CSS när grid blir 1 kolumn) */}
+      <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className={`btn ${mobileMode === 'edit' ? 'btnPrimary' : ''}`}
+          onClick={() => setMobileMode('edit')}
+          aria-selected={mobileMode === 'edit'}
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          className={`btn ${mobileMode === 'preview' ? 'btnPrimary' : ''}`}
+          onClick={() => setMobileMode('preview')}
+          aria-selected={mobileMode === 'preview'}
+        >
+          Preview
+        </button>
+      </div>
+
+      <main className="grid" style={{ marginTop: 12 }}>
+        {/* LEFT: Editor */}
+        <section
+          className="panel"
+          style={{
+            display: mobileMode === 'preview' ? 'none' : 'block',
+          }}
+        >
+          <div className="panelHeader">
+            <h2>Editor</h2>
+            <p className="muted">Update fields — preview refreshes automatically.</p>
+          </div>
+
+          <div className="formGrid">
+            <div className="field">
               <label htmlFor="theme-select">Theme</label>
               <select
                 id="theme-select"
-                className="auth-input"
                 value={selectedThemeId}
                 onChange={(event) => onThemeChange(event.target.value)}
               >
                 {themeOptions.map((theme) => (
-                  <option key={theme.id} value={theme.id}>{theme.displayName}</option>
+                  <option key={theme.id} value={theme.id}>
+                    {theme.displayName}
+                  </option>
                 ))}
               </select>
+            </div>
 
+            <div className="field">
               <label htmlFor="resume-name">Full name</label>
-              <input id="resume-name" className="auth-input" value={resumeDraft.name} onChange={(event) => onResumeDraftChange('name', event.target.value)} />
+              <input
+                id="resume-name"
+                value={resumeDraft.name}
+                onChange={(event) => onResumeDraftChange('name', event.target.value)}
+              />
+            </div>
 
+            <div className="field">
               <label htmlFor="resume-label">Professional title</label>
-              <input id="resume-label" className="auth-input" value={resumeDraft.label} onChange={(event) => onResumeDraftChange('label', event.target.value)} />
+              <input
+                id="resume-label"
+                value={resumeDraft.label}
+                onChange={(event) => onResumeDraftChange('label', event.target.value)}
+              />
+            </div>
 
+            <div className="field">
               <label htmlFor="resume-email">Email</label>
-              <input id="resume-email" className="auth-input" value={resumeDraft.email} onChange={(event) => onResumeDraftChange('email', event.target.value)} />
+              <input
+                id="resume-email"
+                value={resumeDraft.email}
+                onChange={(event) => onResumeDraftChange('email', event.target.value)}
+              />
+            </div>
 
+            <div className="field">
               <label htmlFor="resume-phone">Phone</label>
-              <input id="resume-phone" className="auth-input" value={resumeDraft.phone} onChange={(event) => onResumeDraftChange('phone', event.target.value)} />
+              <input
+                id="resume-phone"
+                value={resumeDraft.phone}
+                onChange={(event) => onResumeDraftChange('phone', event.target.value)}
+              />
+            </div>
 
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label htmlFor="resume-summary">Summary</label>
-              <textarea id="resume-summary" className="auth-input" rows={4} value={resumeDraft.summary} onChange={(event) => onResumeDraftChange('summary', event.target.value)} />
+              <textarea
+                id="resume-summary"
+                rows={4}
+                value={resumeDraft.summary}
+                onChange={(event) => onResumeDraftChange('summary', event.target.value)}
+              />
+            </div>
 
+            <div className="field">
               <label htmlFor="resume-work-company">Current company</label>
-              <input id="resume-work-company" className="auth-input" value={resumeDraft.workCompany} onChange={(event) => onResumeDraftChange('workCompany', event.target.value)} />
+              <input
+                id="resume-work-company"
+                value={resumeDraft.workCompany}
+                onChange={(event) => onResumeDraftChange('workCompany', event.target.value)}
+              />
+            </div>
 
+            <div className="field">
               <label htmlFor="resume-work-position">Current role</label>
-              <input id="resume-work-position" className="auth-input" value={resumeDraft.workPosition} onChange={(event) => onResumeDraftChange('workPosition', event.target.value)} />
+              <input
+                id="resume-work-position"
+                value={resumeDraft.workPosition}
+                onChange={(event) => onResumeDraftChange('workPosition', event.target.value)}
+              />
+            </div>
 
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label htmlFor="resume-work-highlights">Work highlights (one per line)</label>
-              <textarea id="resume-work-highlights" className="auth-input" rows={5} value={resumeDraft.workHighlights} onChange={(event) => onResumeDraftChange('workHighlights', event.target.value)} />
+              <textarea
+                id="resume-work-highlights"
+                rows={5}
+                value={resumeDraft.workHighlights}
+                onChange={(event) => onResumeDraftChange('workHighlights', event.target.value)}
+              />
+            </div>
 
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label htmlFor="resume-skills">Skills (comma separated)</label>
-              <input id="resume-skills" className="auth-input" value={resumeDraft.skillsKeywords} onChange={(event) => onResumeDraftChange('skillsKeywords', event.target.value)} />
+              <input
+                id="resume-skills"
+                value={resumeDraft.skillsKeywords}
+                onChange={(event) => onResumeDraftChange('skillsKeywords', event.target.value)}
+              />
+            </div>
 
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label htmlFor="cv-content">CV notes</label>
-              <textarea id="cv-content" className="auth-input" rows={8} value={cv} onChange={(event) => onCvChange(event.target.value)} />
+              <textarea
+                id="cv-content"
+                rows={7}
+                value={cv}
+                onChange={(event) => onCvChange(event.target.value)}
+              />
+            </div>
 
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label htmlFor="cover-letter-content">Cover letter draft</label>
-              <textarea id="cover-letter-content" className="auth-input" rows={8} value={coverLetter} onChange={(event) => onCoverLetterChange(event.target.value)} />
+              <textarea
+                id="cover-letter-content"
+                rows={7}
+                value={coverLetter}
+                onChange={(event) => onCoverLetterChange(event.target.value)}
+              />
             </div>
           </div>
+        </section>
 
-          <div className="home-preview-panel">
+        {/* RIGHT: Preview */}
+        <aside
+          className="preview"
+          style={{
+            display: mobileMode === 'edit' ? 'none' : 'flex',
+          }}
+        >
+          <div className="previewHeader">
+            <h2>Preview</h2>
+            <span className="muted">A4</span>
+          </div>
+
+          <div className="previewFrame">
             <ResumePreviewFrame html={previewHtml} />
           </div>
-        </div>
-
-        {status ? <p className="status-message">{status}</p> : null}
-        {error ? <p className="error-message">{error}</p> : null}
-        <SupabaseTest />
-      </section>
-    </main>
+        </aside>
+      </main>
+    </div>
   )
 }
 

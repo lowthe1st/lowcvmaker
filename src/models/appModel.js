@@ -1,186 +1,212 @@
-﻿const AUTH_KEY = 'lowcvmaker_auth_user'
-const USERS_KEY = 'lowcvmaker_users'
-const DOCS_KEY = 'lowcvmaker_docs'
+﻿import { supabase } from './supabaseClient.js'
 
+/**
+ * =========================
+ * AUTH STATE SUBSCRIBERS
+ * =========================
+ */
 const authListeners = new Set()
-let currentAuthUser = readJson(AUTH_KEY, null)
+let currentAuthUser = null
 
-function readJson(key, fallback) {
-  try {
-    const value = localStorage.getItem(key)
-    return value ? JSON.parse(value) : fallback
-  } catch {
-    return fallback
+function mapUser(user) {
+  if (!user) return null
+  return {
+    id: user.id,
+    email: user.email ?? null,
+    provider: user.app_metadata?.provider ?? null,
+    username: user.user_metadata?.username ?? null,
   }
-}
-
-function writeJson(key, value) {
-  localStorage.setItem(key, JSON.stringify(value))
 }
 
 function notifyAuth() {
-  authListeners.forEach((listener) => listener(currentAuthUser))
-}
-
-function setAuthUser(user) {
-  currentAuthUser = user
-  if (user) {
-    writeJson(AUTH_KEY, user)
-  } else {
-    localStorage.removeItem(AUTH_KEY)
+  for (const listener of authListeners) {
+    try {
+      listener(currentAuthUser)
+    } catch (e) {
+      // don't break other listeners
+      console.error('Auth listener error:', e)
+    }
   }
-  notifyAuth()
-  return user
 }
 
-function normalizeEmail(email) {
-  return String(email || '').trim().toLowerCase()
-}
+/**
+ * Subscribe to auth state updates.
+ * Returns an unsubscribe function.
+ */
+export function watchAuthState(listener) {
+  authListeners.add(listener)
 
-function normalizeUsername(username) {
-  return String(username || '').trim()
-}
+  // 1) Init: use session first (fast), then optionally verify user
+  ;(async () => {
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) throw sessionError
 
-function validateUsername(username) {
-  const normalizedUsername = normalizeUsername(username)
+      const sessionUser = sessionData.session?.user ?? null
+      if (sessionUser) {
+        currentAuthUser = mapUser(sessionUser)
+        notifyAuth()
+        return
+      }
 
-  if (!normalizedUsername) {
-    throw new Error('Username is required.')
+      // If no session user, try getUser (covers edge cases)
+      const { data: userData, error: userError } = await supabase.auth.getUser()
+      if (userError) {
+        currentAuthUser = null
+      } else {
+        currentAuthUser = mapUser(userData.user)
+      }
+      notifyAuth()
+    } catch (_err) {
+      currentAuthUser = null
+      notifyAuth()
+    }
+  })()
+
+  // 2) Listen to auth changes
+  const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+    currentAuthUser = mapUser(session?.user ?? null)
+    notifyAuth()
+  })
+
+  // cleanup
+  return () => {
+    authListeners.delete(listener)
+    subscription?.subscription?.unsubscribe()
   }
+}
 
-  if (normalizedUsername.length < 3) {
-    throw new Error('Username must be at least 3 characters long.')
-  }
+/**
+ * =========================
+ * AUTH ACTIONS
+ * =========================
+ */
 
+export async function signUpWithEmail(username, email, password) {
+  const normalizedUsername = String(username || '').trim()
+  const normalizedEmail = String(email || '').trim().toLowerCase()
+  const normalizedPassword = String(password || '')
+
+  if (!normalizedUsername) throw new Error('Username is required.')
+  if (normalizedUsername.length < 3) throw new Error('Username must be at least 3 characters long.')
   if (!/^[a-zA-Z0-9_.]+$/.test(normalizedUsername)) {
     throw new Error('Username can only contain letters, numbers, underscore, and dot.')
   }
+  if (!normalizedEmail || !normalizedPassword) throw new Error('Email and password are required.')
 
-  return normalizedUsername
-}
-
-function getUsers() {
-  return readJson(USERS_KEY, {})
-}
-
-function setUsers(users) {
-  writeJson(USERS_KEY, users)
-}
-
-function getDocsMap() {
-  return readJson(DOCS_KEY, {})
-}
-
-function setDocsMap(map) {
-  writeJson(DOCS_KEY, map)
-}
-
-function buildUserId(provider, email) {
-  const normalized = normalizeEmail(email)
-  return normalized ? `${provider}:${normalized}` : `${provider}:${Date.now()}`
-}
-
-export function watchAuthState(listener) {
-  authListeners.add(listener)
-  listener(currentAuthUser)
-  return () => {
-    authListeners.delete(listener)
-  }
-}
-
-export async function signUpWithEmail(username, email, password) {
-  const normalizedUsername = validateUsername(username)
-  const normalizedEmail = normalizeEmail(email)
-  const normalizedPassword = String(password || '')
-
-  if (!normalizedEmail || !normalizedPassword) {
-    throw new Error('Email and password are required.')
-  }
-
-  const users = getUsers()
-  if (users[normalizedEmail]) {
-    throw new Error('Account already exists for this email.')
-  }
-
-  const user = {
-    id: buildUserId('email', normalizedEmail),
-    provider: 'email',
-    email: normalizedEmail,
-    username: normalizedUsername,
-  }
-
-  users[normalizedEmail] = {
+  const { data, error } = await supabase.auth.signUp({
     email: normalizedEmail,
     password: normalizedPassword,
-    username: normalizedUsername,
-    user,
-  }
-  setUsers(users)
+    options: { data: { username: normalizedUsername } },
+  })
 
-  return setAuthUser(user)
+  if (error) throw error
+  return mapUser(data.user)
 }
 
 export async function logInWithEmail(email, password) {
-  const normalizedEmail = normalizeEmail(email)
+  const normalizedEmail = String(email || '').trim().toLowerCase()
   const normalizedPassword = String(password || '')
+  if (!normalizedEmail || !normalizedPassword) throw new Error('Email and password are required.')
 
-  if (!normalizedEmail || !normalizedPassword) {
-    throw new Error('Email and password are required.')
-  }
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: normalizedEmail,
+    password: normalizedPassword,
+  })
 
-  const users = getUsers()
-  const account = users[normalizedEmail]
-
-  if (!account || account.password !== normalizedPassword) {
-    throw new Error('Invalid email or password.')
-  }
-
-  const loggedInUser = {
-    ...account.user,
-    username: account.username || account.user?.username || null,
-  }
-
-  return setAuthUser(loggedInUser)
+  if (error) throw error
+  return mapUser(data.user)
 }
 
 export async function signInWithGoogle() {
-  const user = {
-    id: buildUserId('google', `user-${Date.now()}@google.local`),
+  const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
-    email: null,
-    username: null,
-  }
-  return setAuthUser(user)
+    options: { redirectTo: window.location.origin },
+  })
+  if (error) throw error
+  return data
 }
 
 export async function signInWithApple() {
-  const user = {
-    id: buildUserId('apple', `user-${Date.now()}@apple.local`),
+  const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'apple',
-    email: null,
-    username: null,
-  }
-  return setAuthUser(user)
-}
-
-export async function loadLatestContent(userId) {
-  const docsMap = getDocsMap()
-  return docsMap[userId] || { cv: '', coverLetter: '' }
-}
-
-export async function saveLatestContent(userId, updates) {
-  const docsMap = getDocsMap()
-  const previous = docsMap[userId] || { cv: '', coverLetter: '' }
-  const next = {
-    ...previous,
-    ...updates,
-  }
-
-  docsMap[userId] = next
-  setDocsMap(docsMap)
-  return next
+    options: { redirectTo: window.location.origin },
+  })
+  if (error) throw error
+  return data
 }
 
 export async function logOut() {
-  setAuthUser(null)
+  const { error } = await supabase.auth.signOut()
+  if (error) throw error
+}
+
+/**
+ * =========================
+ * DB (PERSISTENT DOCS)
+ * =========================
+ */
+
+/**
+ * Load the user's latest content from user_documents.
+ * If the row doesn't exist yet, return empty defaults.
+ */
+export async function loadLatestContent(userId) {
+  if (!userId) throw new Error('Missing userId')
+
+  // maybeSingle handles "0 rows" gracefully in many cases
+  const { data, error } = await supabase
+    .from('user_documents')
+    .select('cv, cover_letter, resume_draft, selected_theme_id')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  // If no row yet, return defaults
+  if (!data) {
+    // If there's an error besides "no rows", throw it
+    if (error && error.code && error.code !== 'PGRST116') {
+      throw error
+    }
+    return { cv: '', coverLetter: '', resumeDraft: {}, selectedThemeId: 'even' }
+  }
+
+  // If we got data but still an error (rare), throw
+  if (error) throw error
+
+  return {
+    cv: data.cv ?? '',
+    coverLetter: data.cover_letter ?? '',
+    resumeDraft: data.resume_draft ?? {},
+    selectedThemeId: data.selected_theme_id ?? 'even',
+  }
+}
+
+/**
+ * Upsert the user's latest content into user_documents.
+ */
+export async function saveLatestContent(userId, updates) {
+  if (!userId) throw new Error('Missing userId')
+
+  const payload = {
+    user_id: userId,
+    cv: updates?.cv ?? '',
+    cover_letter: updates?.coverLetter ?? '',
+    resume_draft: updates?.resumeDraft ?? {},
+    selected_theme_id: updates?.selectedThemeId ?? 'even',
+  }
+
+  const { data, error } = await supabase
+    .from('user_documents')
+    .upsert(payload, { onConflict: 'user_id' })
+    .select('cv, cover_letter, resume_draft, selected_theme_id')
+    .single()
+
+  if (error) throw error
+
+  return {
+    cv: data.cv ?? '',
+    coverLetter: data.cover_letter ?? '',
+    resumeDraft: data.resume_draft ?? {},
+    selectedThemeId: data.selected_theme_id ?? 'even',
+  }
 }

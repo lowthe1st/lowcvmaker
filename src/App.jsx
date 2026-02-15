@@ -13,6 +13,7 @@ import LogInView from './views/logInView.jsx'
 import SignUpView from './views/signUpView.jsx'
 
 const DEFAULT_THEME_ID = 'even'
+const SCREEN_KEY = 'lowcvmaker_screen'
 
 function createInitialResumeDraft() {
   return {
@@ -74,10 +75,7 @@ function buildFallbackThemeHtml(message = 'Unable to render preview.') {
 }
 
 function ensureHtmlDocument(htmlString) {
-  if (/<html[\s>]/i.test(htmlString)) {
-    return htmlString
-  }
-
+  if (/<html[\s>]/i.test(htmlString)) return htmlString
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -88,13 +86,18 @@ function ensureHtmlDocument(htmlString) {
 </html>`
 }
 
-function App() {
+export default function App() {
   const signUpPresenter = useSignUpPresenter()
   const logInPresenter = useLogInPresenter()
   const homePresenter = useHomePresenter()
 
   const [authUser, setAuthUser] = useState(null)
-  const [screen, setScreen] = useState('landing')
+
+  // Persist screen between reloads
+const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || 'landing')
+
+
+
   const [screenHistory, setScreenHistory] = useState([])
   const [pendingTemplateId, setPendingTemplateId] = useState(null)
   const [pendingThemeId, setPendingThemeId] = useState(null)
@@ -121,6 +124,7 @@ function App() {
 
   useEffect(() => {
     screenRef.current = screen
+    localStorage.setItem(SCREEN_KEY, screen)
   }, [screen])
 
   useEffect(() => {
@@ -128,35 +132,40 @@ function App() {
   }, [screenHistory])
 
   useEffect(() => {
-    window.history.replaceState({ appScreen: 'landing' }, '')
+  // starta history med den screen vi faktiskt har (från lastScreen eller default)
+  window.history.replaceState({ appScreen: screenRef.current }, '')
+  window.history.pushState({ appScreen: screenRef.current }, '')
+
+  function handlePopState() {
+    if (historyRef.current.length > 0) {
+      goBack(true)
+      return
+    }
+
+    setScreen('landing')
+    screenRef.current = 'landing'
+    setScreenHistory([])
+    historyRef.current = []
     window.history.pushState({ appScreen: 'landing' }, '')
+ localStorage.setItem(SCREEN_KEY, 'landing')
 
-    function handlePopState() {
-      if (historyRef.current.length > 0) {
-        goBack(true)
-        return
-      }
+  }
 
-      setScreen('landing')
-      screenRef.current = 'landing'
-      setScreenHistory([])
-      historyRef.current = []
-      window.history.pushState({ appScreen: 'landing' }, '')
-    }
+  window.addEventListener('popstate', handlePopState)
+  return () => window.removeEventListener('popstate', handlePopState)
+}, [])
 
-    window.addEventListener('popstate', handlePopState)
-    return () => {
-      window.removeEventListener('popstate', handlePopState)
-    }
+
+  // ✅ Auth subscription (stable)
+  useEffect(() => {
+    const unsubscribe = watchAuthState((user) => setAuthUser(user))
+    return () => unsubscribe?.()
   }, [])
 
+  // ✅ Load user data when authUser.id changes (NOT homePresenter dependency)
   useEffect(() => {
-    return watchAuthState((user) => {
-      setAuthUser(user)
-    })
-  }, [])
+    let cancelled = false
 
-  useEffect(() => {
     async function run() {
       if (!authUser?.id) {
         setCv('')
@@ -169,19 +178,25 @@ function App() {
       try {
         setError('')
         const latest = await homePresenter.loadLatestCvAndCoverLetter(authUser.id)
+        if (cancelled) return
+
         setCv(latest.cv || '')
         setCoverLetter(latest.coverLetter || '')
         setResumeDraft((previous) => ({ ...previous, ...(latest.resumeDraft || {}) }))
-        const themeExists = jsonResumeThemes.some((theme) => theme.id === latest.selectedThemeId)
+        const themeExists = jsonResumeThemes.some((t) => t.id === latest.selectedThemeId)
         setSelectedThemeId(themeExists ? latest.selectedThemeId : DEFAULT_THEME_ID)
       } catch (err) {
-        setError(err.message || 'Failed to load your data.')
+        if (!cancelled) setError(err.message || 'Failed to load your data.')
       }
     }
 
     run()
-  }, [authUser, homePresenter])
+    return () => {
+      cancelled = true
+    }
+  }, [authUser?.id]) // ✅ only depends on id
 
+  // Render preview with debounce
   useEffect(() => {
     async function runRender() {
       const resumeJson = mapToJsonResume({
@@ -190,56 +205,44 @@ function App() {
         projectDescription: resumeDraft.projectDescription || coverLetter,
       })
 
-      const result = await renderResumeHtml({
-        themeId: selectedThemeId,
-        resumeJson,
-      })
+      const result = await renderResumeHtml({ themeId: selectedThemeId, resumeJson })
 
       if (result.ok) {
         setRenderedPreviewHtml(ensureHtmlDocument(result.html))
         return
       }
-
       setRenderedPreviewHtml(buildFallbackThemeHtml(result.error))
     }
 
-    if (renderTimeoutRef.current) {
-      clearTimeout(renderTimeoutRef.current)
-    }
+    if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current)
 
-    renderTimeoutRef.current = setTimeout(() => {
-      runRender()
-    }, 400)
+    renderTimeoutRef.current = setTimeout(runRender, 400)
 
     return () => {
-      if (renderTimeoutRef.current) {
-        clearTimeout(renderTimeoutRef.current)
-      }
+      if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current)
     }
   }, [resumeDraft, selectedThemeId, cv, coverLetter])
 
+  // Redirect based on auth state
   useEffect(() => {
-    if (authUser && screenRef.current !== 'home') {
-      navigateTo('home', { clearHistory: true })
-      return
-    }
-
-    if (!authUser && screenRef.current === 'home') {
-      navigateTo('landing', { clearHistory: true })
-    }
-  }, [authUser])
+  // Om man är utloggad och försöker vara på home -> tillbaka till landing
+  if (!authUser && screenRef.current === 'home') {
+    navigateTo('landing', { clearHistory: true })
+  }
+}, [authUser])
 
   function clearFeedback() {
     setStatus('')
     setError('')
   }
 
+ 
+
+
   function navigateTo(nextScreen, options = {}) {
     const { clearHistory = false } = options
 
-    if (screenRef.current === nextScreen && !clearHistory) {
-      return
-    }
+    if (screenRef.current === nextScreen && !clearHistory) return
 
     if (clearHistory) {
       setScreenHistory([])
@@ -253,6 +256,9 @@ function App() {
     setScreen(nextScreen)
     screenRef.current = nextScreen
     window.history.pushState({ appScreen: nextScreen }, '')
+
+   localStorage.setItem(SCREEN_KEY, nextScreen)
+
   }
 
   function goBack(isPopState = false) {
@@ -263,24 +269,18 @@ function App() {
       historyRef.current = nextHistory
       setScreen(previousScreen)
       screenRef.current = previousScreen
-      if (!isPopState) {
-        window.history.pushState({ appScreen: previousScreen }, '')
-      }
+      if (!isPopState) window.history.pushState({ appScreen: previousScreen }, '')
       return
     }
 
     setScreen('landing')
     screenRef.current = 'landing'
-    if (!isPopState) {
-      window.history.pushState({ appScreen: 'landing' }, '')
-    }
+    if (!isPopState) window.history.pushState({ appScreen: 'landing' }, '')
   }
 
   function applyTemplate(templateId) {
     const selectedTemplate = getInternalTemplateById(templateId)
-    if (!selectedTemplate) {
-      return
-    }
+    if (!selectedTemplate) return
 
     setCv(selectedTemplate.starterCv)
     setCoverLetter(selectedTemplate.starterCoverLetter)
@@ -300,7 +300,6 @@ function App() {
       navigateTo('home')
       return
     }
-
     setPendingTemplateId(templateId)
     clearFeedback()
     navigateTo('signup')
@@ -314,17 +313,13 @@ function App() {
       navigateTo('home')
       return
     }
-
     setPendingThemeId(themeId)
     clearFeedback()
     navigateTo('signup')
   }
 
   function handleResumeDraftChange(key, value) {
-    setResumeDraft((previous) => ({
-      ...previous,
-      [key]: value,
-    }))
+    setResumeDraft((previous) => ({ ...previous, [key]: value }))
   }
 
   async function handleSignUpWithEmail() {
@@ -336,7 +331,6 @@ function App() {
         applyTemplate(pendingTemplateId)
         setPendingTemplateId(null)
       }
-
       if (pendingThemeId) {
         setSelectedThemeId(pendingThemeId)
         setPendingThemeId(null)
@@ -358,7 +352,6 @@ function App() {
         applyTemplate(pendingTemplateId)
         setPendingTemplateId(null)
       }
-
       if (pendingThemeId) {
         setSelectedThemeId(pendingThemeId)
         setPendingThemeId(null)
@@ -418,9 +411,7 @@ function App() {
   async function handleSave() {
     try {
       setError('')
-      if (!authUser?.id) {
-        throw new Error('You must be logged in to save content.')
-      }
+      if (!authUser?.id) throw new Error('You must be logged in to save content.')
 
       const latest = await homePresenter.saveUpdates(authUser.id, {
         cv,
@@ -432,7 +423,7 @@ function App() {
       setCv(latest.cv || '')
       setCoverLetter(latest.coverLetter || '')
       setResumeDraft((previous) => ({ ...previous, ...(latest.resumeDraft || {}) }))
-      const savedThemeExists = jsonResumeThemes.some((theme) => theme.id === latest.selectedThemeId)
+      const savedThemeExists = jsonResumeThemes.some((t) => t.id === latest.selectedThemeId)
       setSelectedThemeId(savedThemeExists ? latest.selectedThemeId : selectedThemeId)
       setStatus('Saved.')
     } catch (err) {
@@ -454,21 +445,49 @@ function App() {
   }
 
   async function handleDownloadPdf() {
-    const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=980,height=900')
-    if (!printWindow) {
-      setError('Unable to open print window. Please allow popups and try again.')
-      return
+  try {
+    setError('')
+
+    // Skapa en dold iframe
+    const iframe = document.createElement('iframe')
+    iframe.style.position = 'fixed'
+    iframe.style.right = '0'
+    iframe.style.bottom = '0'
+    iframe.style.width = '0'
+    iframe.style.height = '0'
+    iframe.style.border = '0'
+    iframe.setAttribute('aria-hidden', 'true')
+
+    document.body.appendChild(iframe)
+
+    const doc = iframe.contentWindow?.document
+    if (!doc) {
+      iframe.remove()
+      throw new Error('Could not create print frame.')
     }
 
-    printWindow.document.open()
-    printWindow.document.write(renderedPreviewHtml)
-    printWindow.document.close()
-    printWindow.focus()
-    setTimeout(() => {
-      printWindow.print()
-    }, 250)
-    setStatus('Print dialog opened. Choose Save as PDF.')
+    doc.open()
+    doc.write(renderedPreviewHtml)
+    doc.close()
+
+    // Vänta lite så att HTML/CSS hinner laddas i iframe
+    iframe.onload = () => {
+      try {
+        iframe.contentWindow?.focus()
+        iframe.contentWindow?.print()
+        setStatus('Print dialog opened. Choose Save as PDF.')
+      } catch (e) {
+        setError('Print failed. Please try again.')
+      } finally {
+        // städa upp efter en liten stund
+        setTimeout(() => iframe.remove(), 1000)
+      }
+    }
+  } catch (err) {
+    setError(err.message || 'Unable to download PDF.')
   }
+}
+
 
   async function handleLogOut() {
     try {
@@ -503,6 +522,8 @@ function App() {
         onDownloadHtml={handleDownloadHtml}
         onDownloadPdf={handleDownloadPdf}
         onLogOut={handleLogOut}
+
+        onGoHome={() => navigateTo('landing')}
       />
     )
   }
@@ -552,24 +573,17 @@ function App() {
   }
 
   return (
-    <LandingView
-      isAuthenticated={Boolean(authUser)}
-      onGoToLogIn={() => {
-        clearFeedback()
-        navigateTo('login')
-      }}
-      onGoToSignUp={() => {
-        clearFeedback()
-        navigateTo('signup')
-      }}
-      onCreateCv={() => {
-        clearFeedback()
-        navigateTo('signup')
-      }}
-      onUseTemplate={handleUseTemplate}
-      onUseJsonTheme={handleUseJsonTheme}
-    />
-  )
+  <LandingView
+    isAuthenticated={Boolean(authUser)}
+    onGoToDashboard={() => navigateTo('home')}
+    onGoToLogIn={() => { clearFeedback(); navigateTo('login') }}
+    onGoToSignUp={() => { clearFeedback(); navigateTo('signup') }}
+    onCreateCv={() => {
+      clearFeedback()
+      navigateTo(authUser ? 'home' : 'signup')
+    }}
+    onUseTemplate={handleUseTemplate}
+    onUseJsonTheme={handleUseJsonTheme}
+  />
+)
 }
-
-export default App
