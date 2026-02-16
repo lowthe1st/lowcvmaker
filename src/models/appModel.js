@@ -157,7 +157,7 @@ export async function loadLatestContent(userId) {
   // maybeSingle handles "0 rows" gracefully in many cases
   const { data, error } = await supabase
     .from('user_documents')
-    .select('cv, cover_letter, resume_draft, selected_theme_id')
+   .select('cv, cover_letter, resume_draft, selected_theme_id, profile_answers, ai_enabled, ai_last_review')
     .eq('user_id', userId)
     .maybeSingle()
 
@@ -167,18 +167,32 @@ export async function loadLatestContent(userId) {
     if (error && error.code && error.code !== 'PGRST116') {
       throw error
     }
-    return { cv: '', coverLetter: '', resumeDraft: {}, selectedThemeId: 'even' }
+
+    return { 
+  cv: '', 
+  coverLetter: '', 
+  resumeDraft: {}, 
+  selectedThemeId: 'even',
+  profileAnswers: {},
+  aiEnabled: false,
+  aiLastReview: {},
+}
+
   }
 
   // If we got data but still an error (rare), throw
   if (error) throw error
 
   return {
-    cv: data.cv ?? '',
-    coverLetter: data.cover_letter ?? '',
-    resumeDraft: data.resume_draft ?? {},
-    selectedThemeId: data.selected_theme_id ?? 'even',
-  }
+  cv: data.cv ?? '',
+  coverLetter: data.cover_letter ?? '',
+  resumeDraft: data.resume_draft ?? {},
+  selectedThemeId: data.selected_theme_id ?? 'even',
+  profileAnswers: data.profile_answers ?? {},
+  aiEnabled: Boolean(data.ai_enabled),
+  aiLastReview: data.ai_last_review ?? {},
+}
+
 }
 
 /**
@@ -193,12 +207,16 @@ export async function saveLatestContent(userId, updates) {
     cover_letter: updates?.coverLetter ?? '',
     resume_draft: updates?.resumeDraft ?? {},
     selected_theme_id: updates?.selectedThemeId ?? 'even',
+    profile_answers: updates.profileAnswers ?? {},
+    ai_enabled: updates.aiEnabled ?? false,
+    ai_last_review: updates.aiLastReview ?? {},
+
   }
 
   const { data, error } = await supabase
     .from('user_documents')
     .upsert(payload, { onConflict: 'user_id' })
-    .select('cv, cover_letter, resume_draft, selected_theme_id')
+    .select('cv, cover_letter, resume_draft, selected_theme_id, profile_answers, ai_enabled, ai_last_review')
     .single()
 
   if (error) throw error
@@ -208,5 +226,8 @@ export async function saveLatestContent(userId, updates) {
     coverLetter: data.cover_letter ?? '',
     resumeDraft: data.resume_draft ?? {},
     selectedThemeId: data.selected_theme_id ?? 'even',
+    profileAnswers: data.profile_answers ?? {},
+    aiEnabled: Boolean(data.ai_enabled),
+    aiLastReview: data.ai_last_review ?? {},
   }
 }

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import AiPanel from './AiPanel.jsx'
 import ResumePreviewFrame from './ResumePreviewFrame.jsx'
 
 function AppView({
@@ -20,6 +21,12 @@ function AppView({
   onDownloadPdf,
   onLogOut,
   onGoHome,
+  profileAnswers,
+  onProfileAnswersChange,
+  onApplyAiSuggestion,
+  onSaveAiState,
+  resumeJsonForReview,
+
 }) {
   const [mobileMode, setMobileMode] = useState('edit')
 
@@ -89,6 +96,16 @@ function AppView({
           Preview
         </button>
       </div>
+
+      <AiPanel
+  mode="cv"
+  profileAnswers={profileAnswers}
+  onProfileAnswersChange={onProfileAnswersChange}
+  resumeJsonForReview={resumeJsonForReview}
+  onApplySuggestion={onApplyAiSuggestion}
+  onSaveAiState={onSaveAiState}
+/>
+
 
       <main className="grid" style={{ marginTop: 12 }}>
         {/* LEFT: Editor */}

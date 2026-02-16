@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mlc-ai/web-llm": "^0.2.80",
     "@supabase/supabase-js": "^2.95.3",
     "handlebars": "^4.7.8",
     "jsonresume-theme-even": "^0.26.1",

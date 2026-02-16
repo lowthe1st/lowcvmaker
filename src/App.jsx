@@ -118,6 +118,14 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
 
+  const [profileAnswers, setProfileAnswers] = useState({})
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [aiLastReview, setAiLastReview] = useState({})
+
+  const [authChecked, setAuthChecked] = useState(false)
+
+
+
   const screenRef = useRef(screen)
   const historyRef = useRef(screenHistory)
   const renderTimeoutRef = useRef(null)
@@ -132,9 +140,7 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
   }, [screenHistory])
 
   useEffect(() => {
-  // starta history med den screen vi faktiskt har (från lastScreen eller default)
   window.history.replaceState({ appScreen: screenRef.current }, '')
-  window.history.pushState({ appScreen: screenRef.current }, '')
 
   function handlePopState() {
     if (historyRef.current.length > 0) {
@@ -146,9 +152,8 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
     screenRef.current = 'landing'
     setScreenHistory([])
     historyRef.current = []
-    window.history.pushState({ appScreen: 'landing' }, '')
- localStorage.setItem(SCREEN_KEY, 'landing')
-
+    window.history.replaceState({ appScreen: 'landing' }, '')
+    localStorage.setItem(SCREEN_KEY, 'landing')
   }
 
   window.addEventListener('popstate', handlePopState)
@@ -156,11 +161,16 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
 }, [])
 
 
+
   // ✅ Auth subscription (stable)
   useEffect(() => {
-    const unsubscribe = watchAuthState((user) => setAuthUser(user))
-    return () => unsubscribe?.()
-  }, [])
+  const unsubscribe = watchAuthState((user) => {
+    setAuthUser(user)
+    setAuthChecked(true)
+  })
+  return () => unsubscribe?.()
+}, [])
+
 
   // ✅ Load user data when authUser.id changes (NOT homePresenter dependency)
   useEffect(() => {
@@ -179,6 +189,11 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
         setError('')
         const latest = await homePresenter.loadLatestCvAndCoverLetter(authUser.id)
         if (cancelled) return
+
+
+        setProfileAnswers(latest.profileAnswers || {})
+        setAiEnabled(Boolean(latest.aiEnabled))
+        setAiLastReview(latest.aiLastReview || {})
 
         setCv(latest.cv || '')
         setCoverLetter(latest.coverLetter || '')
@@ -225,11 +240,12 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
 
   // Redirect based on auth state
   useEffect(() => {
-  // Om man är utloggad och försöker vara på home -> tillbaka till landing
+  if (!authChecked) return
+
   if (!authUser && screenRef.current === 'home') {
     navigateTo('landing', { clearHistory: true })
   }
-}, [authUser])
+}, [authUser, authChecked])
 
   function clearFeedback() {
     setStatus('')
@@ -293,6 +309,52 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
     setStatus(`Loaded template: ${selectedTemplate.name}`)
     setError('')
   }
+
+  async function saveAiStateToSupabase(next) {
+  // next: { profileAnswers, aiEnabled, aiLastReview }
+  try {
+    if (!authUser?.id) return
+
+    setProfileAnswers(next.profileAnswers ?? profileAnswers)
+    setAiEnabled(next.aiEnabled ?? aiEnabled)
+    setAiLastReview(next.aiLastReview ?? aiLastReview)
+
+    await homePresenter.saveUpdates(authUser.id, {
+      cv,
+      coverLetter,
+      resumeDraft,
+      selectedThemeId,
+      profileAnswers: next.profileAnswers ?? profileAnswers,
+      aiEnabled: next.aiEnabled ?? aiEnabled,
+      aiLastReview: next.aiLastReview ?? aiLastReview,
+    })
+  } catch (e) {
+    // fail silently or show error
+    setError(e?.message || 'Failed to save AI state.')
+  }
+}
+
+
+  function applyAiSuggestion(s) {
+  // field mapping to your current state model
+  if (s.field === 'summary') {
+    setResumeDraft((p) => ({ ...p, summary: s.after }))
+    return
+  }
+  if (s.field === 'workHighlights') {
+    setResumeDraft((p) => ({ ...p, workHighlights: s.after }))
+    return
+  }
+  if (s.field === 'skillsKeywords') {
+    setResumeDraft((p) => ({ ...p, skillsKeywords: s.after }))
+    return
+  }
+  if (s.field === 'coverLetterDraft') {
+    setCoverLetter(s.after)
+    return
+  }
+}
+
 
   function handleUseTemplate(templateId) {
     if (authUser?.id) {
@@ -414,11 +476,15 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
       if (!authUser?.id) throw new Error('You must be logged in to save content.')
 
       const latest = await homePresenter.saveUpdates(authUser.id, {
-        cv,
-        coverLetter,
-        resumeDraft,
-        selectedThemeId,
-      })
+  cv,
+  coverLetter,
+  resumeDraft,
+  selectedThemeId,
+  profileAnswers,
+  aiEnabled,
+  aiLastReview,
+})
+
 
       setCv(latest.cv || '')
       setCoverLetter(latest.coverLetter || '')
@@ -448,7 +514,6 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
   try {
     setError('')
 
-    // Skapa en dold iframe
     const iframe = document.createElement('iframe')
     iframe.style.position = 'fixed'
     iframe.style.right = '0'
@@ -457,7 +522,6 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
     iframe.style.height = '0'
     iframe.style.border = '0'
     iframe.setAttribute('aria-hidden', 'true')
-
     document.body.appendChild(iframe)
 
     const doc = iframe.contentWindow?.document
@@ -470,8 +534,7 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
     doc.write(renderedPreviewHtml)
     doc.close()
 
-    // Vänta lite så att HTML/CSS hinner laddas i iframe
-    iframe.onload = () => {
+    setTimeout(() => {
       try {
         iframe.contentWindow?.focus()
         iframe.contentWindow?.print()
@@ -479,14 +542,14 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
       } catch (e) {
         setError('Print failed. Please try again.')
       } finally {
-        // städa upp efter en liten stund
-        setTimeout(() => iframe.remove(), 1000)
+        setTimeout(() => iframe.remove(), 1500)
       }
-    }
+    }, 300)
   } catch (err) {
     setError(err.message || 'Unable to download PDF.')
   }
 }
+
 
 
   async function handleLogOut() {
@@ -502,31 +565,53 @@ const [screen, setScreen] = useState(() => localStorage.getItem(SCREEN_KEY) || '
     }
   }
 
-  if (screen === 'home' && authUser) {
-    return (
-      <AppView
-        user={authUser}
-        cv={cv}
-        coverLetter={coverLetter}
-        resumeDraft={resumeDraft}
-        selectedThemeId={selectedThemeId}
-        themeOptions={jsonResumeThemes}
-        previewHtml={renderedPreviewHtml}
-        status={status}
-        error={error}
-        onCvChange={setCv}
-        onCoverLetterChange={setCoverLetter}
-        onResumeDraftChange={handleResumeDraftChange}
-        onThemeChange={setSelectedThemeId}
-        onSave={handleSave}
-        onDownloadHtml={handleDownloadHtml}
-        onDownloadPdf={handleDownloadPdf}
-        onLogOut={handleLogOut}
+  const resumeJsonForReview = mapToJsonResume({
+  ...resumeDraft,
+  summary: resumeDraft.summary || cv,
+  projectDescription: resumeDraft.projectDescription || coverLetter,
+})
 
-        onGoHome={() => navigateTo('landing')}
-      />
-    )
-  }
+if (!authChecked) {
+  return (
+    <main style={{ padding: 24, fontFamily: 'Inter, Arial, sans-serif' }}>
+      Loading...
+    </main>
+  )
+}
+
+
+  if (screen === 'home' && authUser) {
+  return (
+    <AppView
+      user={authUser}
+      cv={cv}
+      coverLetter={coverLetter}
+      resumeDraft={resumeDraft}
+      selectedThemeId={selectedThemeId}
+      themeOptions={jsonResumeThemes}
+      previewHtml={renderedPreviewHtml}
+      status={status}
+      error={error}
+      onCvChange={setCv}
+      onCoverLetterChange={setCoverLetter}
+      onResumeDraftChange={handleResumeDraftChange}
+      onThemeChange={setSelectedThemeId}
+      onSave={handleSave}
+      onDownloadHtml={handleDownloadHtml}
+      onDownloadPdf={handleDownloadPdf}
+      onLogOut={handleLogOut}
+      onGoHome={() => navigateTo('landing')}
+
+      // ✅ AI-props
+      profileAnswers={profileAnswers}
+      onProfileAnswersChange={setProfileAnswers}
+      onApplyAiSuggestion={applyAiSuggestion}
+      onSaveAiState={saveAiStateToSupabase}
+      resumeJsonForReview={resumeJsonForReview}
+    />
+  )
+}
+
 
   if (screen === 'signup' && !authUser) {
     return (
